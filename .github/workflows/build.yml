@@ -20,14 +20,13 @@ jobs:
           - os: ubuntu-22.04
             artifact: CreditStatistics-Linux
             ext: ""
-          - os: macos-13
-            artifact: CreditStatistics-macOS-x64
-            ext: ""
-          - os: macos-14
+          - os: macos-15
             artifact: CreditStatistics-macOS-arm64
             ext: ""
 
     runs-on: ${{ matrix.os }}
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
 
