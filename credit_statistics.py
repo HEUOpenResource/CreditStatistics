@@ -21,6 +21,7 @@ from collections import defaultdict
 if sys.platform == "win32":
     try:
         import ctypes
+
         ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Per-Monitor DPI Aware
     except Exception:
         try:
@@ -44,11 +45,12 @@ MAX_CAPTCHA_RETRIES = 30
 #   "B"     → 公选B类学分
 #   "F"     → 公选F类学分
 GRADUATION_REQUIREMENTS = [
-    {"desc": "专选 ≥ 15学分",                      "key": "zx",              "min": 15},
-    {"desc": "A0(中华传统文化类) ≥ 1学分",          "key": "A0",             "min": 1},
-    {"desc": "A + B + C + D + E + F ≥ 12学分",    "key": "A+B+C+D+E+F",   "min": 12},
-    {"desc": "B(艺术鉴赏与审美体验) ≥ 1学分",      "key": "B",              "min": 1},
-    {"desc": "F(创新思维与创业实践) ≥ 6学分",       "key": "F",              "min": 6},
+    {"desc": "专选 ≥ 15学分", "key": "zx", "min": 15},
+    {"desc": "A0(中华传统文化类) ≥ 1学分", "key": "A0", "min": 1},
+    {"desc": "A + B + C + D + E + F ≥ 12学分", "key": "A+B+C+D+E+F", "min": 12},
+    {"desc": "A + B + C ≥ 6学分", "key": "A+B+C", "min": 6},
+    {"desc": "B(艺术鉴赏与审美体验) ≥ 1学分", "key": "B", "min": 1},
+    {"desc": "F(创新思维与创业实践) ≥ 2学分", "key": "F", "min": 2},
 ]
 
 
@@ -69,7 +71,7 @@ def extract_gx_category(display_text):
     """从公选课显示文本中提取类别代号"""
     if not display_text:
         return "未分类"
-    m = re.search(r'[（(]([A-Z]\d?)[）)]', display_text)
+    m = re.search(r"[（(]([A-Z]\d?)[）)]", display_text)
     return m.group(1) if m else "未分类"
 
 
@@ -80,11 +82,12 @@ def semester_sort_key(s):
 # ============ 网络逻辑 ============
 def create_session():
     import urllib3
+
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    })
+    session.headers.update(
+        {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    )
     session.verify = False
     retry = Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])
     adapter = HTTPAdapter(max_retries=retry)
@@ -95,6 +98,7 @@ def create_session():
 
 def cas_login(session, username, password, on_status=None):
     """CAS SSO登录，on_status(msg) 回调状态更新"""
+
     def status(msg):
         if on_status:
             on_status(msg)
@@ -130,18 +134,28 @@ def cas_login(session, username, password, on_status=None):
         captcha_token = captcha_data["token"]
         captcha_b64 = captcha_data["img"].replace("\n", "")
         captcha_bytes = base64.b64decode(captcha_b64)
-        captcha_text = re.sub(r'[^a-z0-9]', '',
-                              ocr.classification(captcha_bytes).lower().strip())
+        captcha_text = re.sub(
+            r"[^a-z0-9]", "", ocr.classification(captcha_bytes).lower().strip()
+        )
 
         if len(captcha_text) != 4:
             continue
 
-        resp = session.post(cas_login_url, data={
-            "username": username, "password": password,
-            "captcha": captcha_text, "token": captcha_token,
-            "lt": lt, "execution": execution,
-            "_eventId": "submit", "source": "cas",
-        }, allow_redirects=True, timeout=15)
+        resp = session.post(
+            cas_login_url,
+            data={
+                "username": username,
+                "password": password,
+                "captcha": captcha_text,
+                "token": captcha_token,
+                "lt": lt,
+                "execution": execution,
+                "_eventId": "submit",
+                "source": "cas",
+            },
+            allow_redirects=True,
+            timeout=15,
+        )
 
         if "cas/login" not in resp.url:
             status("登录成功，正在加载数据...")
@@ -176,13 +190,15 @@ def cas_login(session, username, password, on_status=None):
 
 def init_app(session, app_name):
     resp = session.get(
-        f"{JWGL_BASE}/jwapp/sys/{app_name}/*default/index.do", timeout=15)
+        f"{JWGL_BASE}/jwapp/sys/{app_name}/*default/index.do", timeout=15
+    )
     if "cas/login" in resp.url:
         raise RuntimeError("会话已过期，请重新登录")
 
 
 def fetch_all_data(session, on_status=None):
     """登录后一次性获取所有需要的数据"""
+
     def status(msg):
         if on_status:
             on_status(msg)
@@ -190,29 +206,37 @@ def fetch_all_data(session, on_status=None):
     status("获取学期信息...")
     init_app(session, "cjcx")
     session.post(
-        f"{JWGL_BASE}/jwapp/sys/jwpubapp/pub/setJwCommonAppRole.do", timeout=15)
+        f"{JWGL_BASE}/jwapp/sys/jwpubapp/pub/setJwCommonAppRole.do", timeout=15
+    )
 
     resp = session.post(
-        f"{JWGL_BASE}/jwapp/sys/cjcx/modules/cjcx/cxdqxnxqhsygxnxq.do",
-        timeout=15)
-    semesters = [r["XNXQDM"]
-                 for r in resp.json()["datas"]["cxdqxnxqhsygxnxq"]["rows"]]
-    current_semester = (max(semesters, key=semester_sort_key)
-                        if semesters else "2025-2026-2")
+        f"{JWGL_BASE}/jwapp/sys/cjcx/modules/cjcx/cxdqxnxqhsygxnxq.do", timeout=15
+    )
+    semesters = [r["XNXQDM"] for r in resp.json()["datas"]["cxdqxnxqhsygxnxq"]["rows"]]
+    current_semester = (
+        max(semesters, key=semester_sort_key) if semesters else "2025-2026-2"
+    )
 
     status("获取成绩数据...")
     resp = session.post(
         f"{JWGL_BASE}/jwapp/sys/cjcx/modules/cjcx/xscjcx.do",
-        data={"querySetting": "[]", "*order": "-XNXQDM",
-              "pageSize": "500", "pageNumber": "1"},
-        timeout=15)
+        data={
+            "querySetting": "[]",
+            "*order": "-XNXQDM",
+            "pageSize": "500",
+            "pageNumber": "1",
+        },
+        timeout=15,
+    )
     grades = resp.json()["datas"]["xscjcx"]["rows"]
 
     status("获取课表数据...")
     init_app(session, "wdkb")
     resp = session.post(
         f"{JWGL_BASE}/jwapp/sys/wdkb/modules/xskcb/cxxszhxqkb.do",
-        data={"XNXQDM": current_semester}, timeout=15)
+        data={"XNXQDM": current_semester},
+        timeout=15,
+    )
     rows = resp.json()["datas"]["cxxszhxqkb"]["rows"]
     seen, schedule = set(), []
     for r in rows:
@@ -251,8 +275,10 @@ def compute_stats(grades):
 
     return {
         "passed": passed,
-        "total_bx": total_bx, "bx_count": bx_count,
-        "total_zx": total_zx, "zx_count": zx_count,
+        "total_bx": total_bx,
+        "bx_count": bx_count,
+        "total_zx": total_zx,
+        "zx_count": zx_count,
         "total_gx": total_gx,
         "gx_by_cat": dict(gx_by_cat),
         "gx_count_by_cat": dict(gx_count_by_cat),
@@ -279,12 +305,14 @@ def check_requirements(stats, requirements=None):
     results = []
     for req in requirements:
         actual = eval_requirement(req["key"], stats)
-        results.append({
-            "desc": req["desc"],
-            "actual": actual,
-            "required": req["min"],
-            "passed": actual >= req["min"],
-        })
+        results.append(
+            {
+                "desc": req["desc"],
+                "actual": actual,
+                "required": req["min"],
+                "passed": actual >= req["min"],
+            }
+        )
     return results
 
 
@@ -316,13 +344,14 @@ def _get_dpi_scale(root):
     try:
         if sys.platform == "win32":
             import ctypes
+
             hdc = ctypes.windll.user32.GetDC(0)
             dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX
             ctypes.windll.user32.ReleaseDC(0, hdc)
             return dpi / 96.0
     except Exception:
         pass
-    return root.tk.call('tk', 'scaling') / 1.333333  # tk scaling baseline
+    return root.tk.call("tk", "scaling") / 1.333333  # tk scaling baseline
 
 
 def _pick_font():
@@ -345,7 +374,7 @@ class CreditStatsApp:
         self.font_family = _pick_font()
 
         # 设置tk缩放（让ttk控件尺寸正确）
-        root.tk.call('tk', 'scaling', self.scale * 1.333333)
+        root.tk.call("tk", "scaling", self.scale * 1.333333)
 
         # 登录窗口尺寸（按缩放调整）
         w, h = int(520 * self.scale), int(400 * self.scale)
@@ -385,37 +414,39 @@ class CreditStatsApp:
         center = ttk.Frame(self.login_frame)
         center.place(relx=0.5, rely=0.42, anchor="center")
 
-        ttk.Label(center, text="哈尔滨工程大学",
-                  font=(f, 18, "bold")).pack(pady=(0, 2))
-        ttk.Label(center, text="学分统计系统",
-                  font=(f, 13)).pack(pady=(0, 28))
+        ttk.Label(center, text="哈尔滨工程大学", font=(f, 18, "bold")).pack(pady=(0, 2))
+        ttk.Label(center, text="学分统计系统", font=(f, 13)).pack(pady=(0, 28))
 
         form = ttk.Frame(center)
         form.pack()
 
         ttk.Label(form, text="学号：", font=(f, 11)).grid(
-            row=0, column=0, padx=(0, 6), pady=8, sticky="e")
+            row=0, column=0, padx=(0, 6), pady=8, sticky="e"
+        )
         self.user_var = tk.StringVar()
         self.user_entry = ttk.Entry(
-            form, textvariable=self.user_var, width=24, font=(f, 11))
+            form, textvariable=self.user_var, width=24, font=(f, 11)
+        )
         self.user_entry.grid(row=0, column=1, pady=8)
 
         ttk.Label(form, text="密码：", font=(f, 11)).grid(
-            row=1, column=0, padx=(0, 6), pady=8, sticky="e")
+            row=1, column=0, padx=(0, 6), pady=8, sticky="e"
+        )
         self.pass_var = tk.StringVar()
         self.pass_entry = ttk.Entry(
-            form, textvariable=self.pass_var, width=24, show="\u2022",
-            font=(f, 11))
+            form, textvariable=self.pass_var, width=24, show="\u2022", font=(f, 11)
+        )
         self.pass_entry.grid(row=1, column=1, pady=8)
 
         self.login_btn = ttk.Button(
-            center, text="登录查询", command=self._on_login, width=18)
+            center, text="登录查询", command=self._on_login, width=18
+        )
         self.login_btn.pack(pady=22)
 
         self.status_var = tk.StringVar()
         self.status_label = ttk.Label(
-            center, textvariable=self.status_var, foreground="gray",
-            font=(f, 9))
+            center, textvariable=self.status_var, foreground="gray", font=(f, 9)
+        )
         self.status_label.pack()
 
         # 快捷键
@@ -504,8 +535,9 @@ class CreditStatsApp:
         canvas = tk.Canvas(outer, highlightthickness=0)
         vsb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
         inner = ttk.Frame(canvas, padding=12)
-        inner.bind("<Configure>",
-                   lambda _: canvas.configure(scrollregion=canvas.bbox("all")))
+        inner.bind(
+            "<Configure>", lambda _: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
         canvas.create_window((0, 0), window=inner, anchor="nw")
         canvas.configure(yscrollcommand=vsb.set)
         canvas.pack(side="left", fill="both", expand=True)
@@ -513,6 +545,7 @@ class CreditStatsApp:
 
         def _on_mousewheel(event):
             canvas.yview_scroll(-1 * (event.delta // 120), "units")
+
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
         f = self.font_family
@@ -535,13 +568,16 @@ class CreditStatsApp:
                 xf = stats["gx_by_cat"][code]
                 cnt = stats["gx_count_by_cat"][code]
                 lines.append(f"      {code}（{nm}）：{xf:.1f} 学分（{cnt} 门）")
-            elif any(r["key"] == code or code in r["key"].split("+")
-                     for r in self.requirements):
+            elif any(
+                r["key"] == code or code in r["key"].split("+")
+                for r in self.requirements
+            ):
                 nm = GX_CATEGORY_NAMES.get(code, code)
                 lines.append(f"      {code}（{nm}）：0.0 学分（0 门）")
 
-        ttk.Label(sf, text="\n".join(lines), justify="left",
-                  font=(f, 11)).pack(anchor="w")
+        ttk.Label(sf, text="\n".join(lines), justify="left", font=(f, 11)).pack(
+            anchor="w"
+        )
 
         # ---- 毕业要求检查（当前） ----
         rf = ttk.LabelFrame(inner, text="毕业要求检查 — 当前", padding=12)
@@ -553,16 +589,26 @@ class CreditStatsApp:
 
         ttk.Separator(rf, orient="horizontal").pack(fill="x", pady=(10, 6))
         if all_pass:
-            ttk.Label(rf, text="  所有毕业要求均已满足！",
-                      foreground="#228B22", font=(f, 13, "bold")).pack(anchor="w")
+            ttk.Label(
+                rf,
+                text="  所有毕业要求均已满足！",
+                foreground="#228B22",
+                font=(f, 13, "bold"),
+            ).pack(anchor="w")
         else:
-            ttk.Label(rf, text="  部分毕业要求未达标",
-                      foreground="#CC0000", font=(f, 13, "bold")).pack(anchor="w")
+            ttk.Label(
+                rf,
+                text="  部分毕业要求未达标",
+                foreground="#CC0000",
+                font=(f, 13, "bold"),
+            ).pack(anchor="w")
 
         # ---- 毕业要求预测（本学期课程全部通过后） ----
         pf = ttk.LabelFrame(
-            inner, text=f"毕业要求预测 — 若本学期（{self.semester}）课程全部通过",
-            padding=12)
+            inner,
+            text=f"毕业要求预测 — 若本学期（{self.semester}）课程全部通过",
+            padding=12,
+        )
         pf.pack(fill="x", pady=(0, 14))
 
         all_pred_pass = all(r["passed"] for r in pred_reqs)
@@ -572,12 +618,20 @@ class CreditStatsApp:
 
         ttk.Separator(pf, orient="horizontal").pack(fill="x", pady=(10, 6))
         if all_pred_pass:
-            ttk.Label(pf, text="  本学期结束后可满足所有毕业要求！",
-                      foreground="#228B22", font=(f, 13, "bold")).pack(anchor="w")
+            ttk.Label(
+                pf,
+                text="  本学期结束后可满足所有毕业要求！",
+                foreground="#228B22",
+                font=(f, 13, "bold"),
+            ).pack(anchor="w")
         else:
             still_fail = [r for r in pred_reqs if not r["passed"]]
-            ttk.Label(pf, text=f"  本学期结束后仍有 {len(still_fail)} 项未达标",
-                      foreground="#CC0000", font=(f, 13, "bold")).pack(anchor="w")
+            ttk.Label(
+                pf,
+                text=f"  本学期结束后仍有 {len(still_fail)} 项未达标",
+                foreground="#CC0000",
+                font=(f, 13, "bold"),
+            ).pack(anchor="w")
 
     def _render_req_line(self, parent, r, highlight_improved=False):
         ok = r["passed"]
@@ -592,8 +646,12 @@ class CreditStatsApp:
             marker = "[达标↑]"
         else:
             fg = "#228B22" if ok else "#CC0000"
-        ttk.Label(parent, text=f"  {marker}  {r['desc']}  {detail}",
-                  foreground=fg, font=(self.font_family, 11)).pack(anchor="w", pady=2)
+        ttk.Label(
+            parent,
+            text=f"  {marker}  {r['desc']}  {detail}",
+            foreground=fg,
+            font=(self.font_family, 11),
+        ).pack(anchor="w", pady=2)
 
     # ---- Tab 2: 成绩明细 ----
     def _tab_grades(self, nb):
@@ -604,10 +662,22 @@ class CreditStatsApp:
         cols = ("sem", "name", "type", "cat", "credit", "score")
         tree = ttk.Treeview(frame, columns=cols, show="headings")
 
-        headers = {"sem": "学期", "name": "课程名称", "type": "类型",
-                   "cat": "公选类别", "credit": "学分", "score": "成绩"}
-        widths = {"sem": 140, "name": 280, "type": 55,
-                  "cat": 180, "credit": 55, "score": 65}
+        headers = {
+            "sem": "学期",
+            "name": "课程名称",
+            "type": "类型",
+            "cat": "公选类别",
+            "credit": "学分",
+            "score": "成绩",
+        }
+        widths = {
+            "sem": 140,
+            "name": 280,
+            "type": 55,
+            "cat": 180,
+            "credit": 55,
+            "score": 65,
+        }
         for c in cols:
             tree.heading(c, text=headers[c])
             anch = "w" if c in ("name", "cat") else "center"
@@ -628,18 +698,16 @@ class CreditStatsApp:
                 name = g["KCM"]
                 ctype = g["KCXZDM_DISPLAY"]
                 xf = g["XF"]
-                score = g.get("ZCJ") or g.get("DJCJMC") or \
-                    g.get("XSZCJMC") or ""
+                score = g.get("ZCJ") or g.get("DJCJMC") or g.get("XSZCJMC") or ""
                 cat = ""
                 if ctype == "公选":
-                    cc = extract_gx_category(
-                        g.get("XGXKLBDMKC_DISPLAY", ""))
+                    cc = extract_gx_category(g.get("XGXKLBDMKC_DISPLAY", ""))
                     cn = GX_CATEGORY_NAMES.get(cc, "")
                     cat = f"{cc}（{cn}）" if cn else cc
                 tag = ("odd",) if idx % 2 else ()
-                tree.insert("", "end",
-                            values=(sem_d, name, ctype, cat, xf, score),
-                            tags=tag)
+                tree.insert(
+                    "", "end", values=(sem_d, name, ctype, cat, xf, score), tags=tag
+                )
                 idx += 1
 
     # ---- Tab 3: 本学期课表 ----
@@ -652,10 +720,22 @@ class CreditStatsApp:
         cols = ("name", "type", "cat", "credit", "teacher", "time")
         tree = ttk.Treeview(frame, columns=cols, show="headings")
 
-        headers = {"name": "课程名称", "type": "类型", "cat": "类别",
-                   "credit": "学分", "teacher": "教师", "time": "时间地点"}
-        widths = {"name": 260, "type": 55, "cat": 180,
-                  "credit": 55, "teacher": 80, "time": 300}
+        headers = {
+            "name": "课程名称",
+            "type": "类型",
+            "cat": "类别",
+            "credit": "学分",
+            "teacher": "教师",
+            "time": "时间地点",
+        }
+        widths = {
+            "name": 260,
+            "type": 55,
+            "cat": 180,
+            "credit": 55,
+            "teacher": 80,
+            "time": 300,
+        }
         for c in cols:
             tree.heading(c, text=headers[c])
             anch = "w" if c in ("name", "cat", "time") else "center"
@@ -680,14 +760,16 @@ class CreditStatsApp:
                 cn = GX_CATEGORY_NAMES.get(cc, "")
                 cat = f"{cc}（{cn}）" if cn else cc
             tag = ("odd",) if idx % 2 else ()
-            tree.insert("", "end",
-                        values=(name, ctype, cat, xf, teacher, sched),
-                        tags=tag)
+            tree.insert(
+                "", "end", values=(name, ctype, cat, xf, teacher, sched), tags=tag
+            )
 
         total_xf = sum(float(c["XF"]) for c in schedule)
-        ttk.Label(frame,
-                  text=f"共 {len(schedule)} 门课程，{total_xf:.1f} 学分",
-                  font=(self.font_family, 10)).pack(pady=6)
+        ttk.Label(
+            frame,
+            text=f"共 {len(schedule)} 门课程，{total_xf:.1f} 学分",
+            font=(self.font_family, 10),
+        ).pack(pady=6)
 
     # ---- Tab 4: 毕业要求配置 ----
     def _tab_requirements(self, nb):
@@ -695,13 +777,20 @@ class CreditStatsApp:
         nb.add(frame, text=" 毕业要求配置 ")
         f = self.font_family
 
-        ttk.Label(frame, text='编辑毕业学分要求，修改后点击「应用」可实时更新学分总览。',
-                  font=(f, 10), foreground="gray").pack(anchor="w", pady=(0, 8))
+        ttk.Label(
+            frame,
+            text="编辑毕业学分要求，修改后点击「应用」可实时更新学分总览。",
+            font=(f, 10),
+            foreground="gray",
+        ).pack(anchor="w", pady=(0, 8))
 
-        hint = ('key 填写说明："zx" = 专选总学分；单个类别如 "A0" "B" "F"；'
-                '多个类别求和用 + 连接，如 "A+B+C"')
-        ttk.Label(frame, text=hint, font=(f, 9), foreground="#666",
-                  wraplength=800).pack(anchor="w", pady=(0, 10))
+        hint = (
+            'key 填写说明："zx" = 专选总学分；单个类别如 "A0" "B" "F"；'
+            '多个类别求和用 + 连接，如 "A+B+C"'
+        )
+        ttk.Label(
+            frame, text=hint, font=(f, 9), foreground="#666", wraplength=800
+        ).pack(anchor="w", pady=(0, 10))
 
         # Treeview
         tree_frame = ttk.Frame(frame)
@@ -709,7 +798,8 @@ class CreditStatsApp:
 
         cols = ("desc", "key", "min")
         self.req_tree = ttk.Treeview(
-            tree_frame, columns=cols, show="headings", height=8)
+            tree_frame, columns=cols, show="headings", height=8
+        )
         self.req_tree.heading("desc", text="描述")
         self.req_tree.heading("key", text="Key")
         self.req_tree.heading("min", text="最低学分")
@@ -718,8 +808,7 @@ class CreditStatsApp:
         self.req_tree.column("min", width=100, anchor="center")
         self.req_tree.tag_configure("odd", background="#F5F5F5")
 
-        vsb = ttk.Scrollbar(tree_frame, orient="vertical",
-                            command=self.req_tree.yview)
+        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.req_tree.yview)
         self.req_tree.configure(yscrollcommand=vsb.set)
         self.req_tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
@@ -734,28 +823,34 @@ class CreditStatsApp:
         row0.pack(fill="x", pady=2)
         ttk.Label(row0, text="描述：", font=(f, 10)).pack(side="left")
         self.req_desc_var = tk.StringVar()
-        ttk.Entry(row0, textvariable=self.req_desc_var, width=40,
-                  font=(f, 10)).pack(side="left", padx=(4, 16))
+        ttk.Entry(row0, textvariable=self.req_desc_var, width=40, font=(f, 10)).pack(
+            side="left", padx=(4, 16)
+        )
         ttk.Label(row0, text="Key：", font=(f, 10)).pack(side="left")
         self.req_key_var = tk.StringVar()
-        ttk.Entry(row0, textvariable=self.req_key_var, width=14,
-                  font=(f, 10)).pack(side="left", padx=(4, 16))
+        ttk.Entry(row0, textvariable=self.req_key_var, width=14, font=(f, 10)).pack(
+            side="left", padx=(4, 16)
+        )
         ttk.Label(row0, text="最低学分：", font=(f, 10)).pack(side="left")
         self.req_min_var = tk.StringVar()
-        ttk.Entry(row0, textvariable=self.req_min_var, width=8,
-                  font=(f, 10)).pack(side="left", padx=(4, 0))
+        ttk.Entry(row0, textvariable=self.req_min_var, width=8, font=(f, 10)).pack(
+            side="left", padx=(4, 0)
+        )
 
         btn_frame = ttk.Frame(edit_frame)
         btn_frame.pack(fill="x", pady=(8, 0))
-        ttk.Button(btn_frame, text="添加",
-                   command=self._req_add, width=10).pack(side="left", padx=4)
-        ttk.Button(btn_frame, text="更新选中",
-                   command=self._req_update, width=10).pack(side="left", padx=4)
-        ttk.Button(btn_frame, text="删除选中",
-                   command=self._req_delete, width=10).pack(side="left", padx=4)
-        ttk.Button(btn_frame, text="应用并刷新总览",
-                   command=self._req_apply,
-                   width=16).pack(side="right", padx=4)
+        ttk.Button(btn_frame, text="添加", command=self._req_add, width=10).pack(
+            side="left", padx=4
+        )
+        ttk.Button(btn_frame, text="更新选中", command=self._req_update, width=10).pack(
+            side="left", padx=4
+        )
+        ttk.Button(btn_frame, text="删除选中", command=self._req_delete, width=10).pack(
+            side="left", padx=4
+        )
+        ttk.Button(
+            btn_frame, text="应用并刷新总览", command=self._req_apply, width=16
+        ).pack(side="right", padx=4)
 
         self.req_tree.bind("<<TreeviewSelect>>", self._req_on_select)
 
@@ -765,9 +860,12 @@ class CreditStatsApp:
         for i, req in enumerate(self.requirements):
             tag = ("odd",) if i % 2 else ()
             self.req_tree.insert(
-                "", "end", iid=str(i),
+                "",
+                "end",
+                iid=str(i),
                 values=(req["desc"], req["key"], req["min"]),
-                tags=tag)
+                tags=tag,
+            )
 
     def _req_on_select(self, _event):
         sel = self.req_tree.selection()
@@ -791,7 +889,8 @@ class CreditStatsApp:
             messagebox.showwarning(
                 "提示",
                 f"Key 无效。可用值：zx, {', '.join(sorted(GX_CATEGORY_NAMES.keys()))}\n"
-                f"多个类别用 + 连接，如 A+B+C")
+                f"多个类别用 + 连接，如 A+B+C",
+            )
             return None
         try:
             min_val = float(min_s)
